@@ -13,24 +13,24 @@ const dist = (a, b) => Math.hypot(...rgb(a).map((v, i) => v - rgb(b)[i]));
 const SHIRTS = () => Object.values(M.SHIRT_COLORS);
 const MODELS = () => Object.values(M.MODEL_COLORS);
 
-test("hatModel: the claim's model wins over models[role]", () => {
+test("hat_model_claim_model_wins", () => {
   assert.equal(M.hatModel(job({ action: "build", model: "opus" }, { builder: "sonnet" }), "builder"), "opus");
 });
 
-test("hatModel: falls back to models[role] without a claim model", () => {
+test("hat_model_falls_back_to_models_role", () => {
   assert.equal(M.hatModel(job(null, { builder: "sonnet" }), "builder"), "sonnet");
   assert.equal(M.hatModel(job({ action: "build" }, { builder: "sonnet" }), "builder"), "sonnet");
   assert.equal(M.hatModel(job({ action: "build", model: "" }, { builder: "sonnet" }), "builder"), "sonnet");
 });
 
-test("hatModel: unknown is null, and claims cover roles missing from models", () => {
+test("hat_model_unknown_is_null_and_claims_cover_missing_roles", () => {
   assert.equal(M.hatModel(job(null, { builder: "sonnet" }), "planner"), null);
   assert.equal(M.hatModel(job(null, undefined), "planner"), null);
   assert.equal(M.hatModel(job({ action: "plan", model: "opus" }, { builder: "a", reviewer: "b" }), "planner"), "opus");
   assert.equal(M.hatModel(job({ action: "final-review", model: "sonnet" }, {}), "reviewer"), "sonnet");
 });
 
-test("hatColor: model, neutral and idle colours", () => {
+test("hat_color_model_neutral_and_idle", () => {
   for (const m of ["haiku", "sonnet", "opus"]) {
     assert.equal(M.hatColor(job({ model: m }, {}), "builder"), M.MODEL_COLORS[m]);
   }
@@ -42,11 +42,11 @@ test("hatColor: model, neutral and idle colours", () => {
   }
 });
 
-test("palette: neutral differs from every shirt and model colour", () => {
+test("palette_neutral_is_distinct", () => {
   for (const c of [...SHIRTS(), ...MODELS()]) assert.notEqual(M.UNKNOWN_MODEL_COLOR, c);
 });
 
-test("palette: hats are at least 100 RGB apart from shirts and from each other", () => {
+test("palette_hats_100_rgb_apart", () => {
   for (const h of [...MODELS(), M.UNKNOWN_MODEL_COLOR]) {
     for (const s of SHIRTS()) assert.ok(dist(h, s) >= 100, `${h} vs ${s}`);
   }
@@ -54,7 +54,7 @@ test("palette: hats are at least 100 RGB apart from shirts and from each other",
   for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++) assert.ok(dist(ms[i], ms[j]) >= 100);
 });
 
-test("legend: swatches match the palette", () => {
+test("legend_swatches_match_palette", () => {
   const html = fs.readFileSync(path.join(WEB, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(WEB, "office.css"), "utf8");
   const want = { planner: M.SHIRT_COLORS.planner, builder: M.SHIRT_COLORS.builder, reviewer: M.SHIRT_COLORS.reviewer,
@@ -67,7 +67,7 @@ test("legend: swatches match the palette", () => {
   }
 });
 
-test("office.js draws hats through model.js", () => {
+test("office_js_uses_model_hat_color", () => {
   const src = fs.readFileSync(path.join(WEB, "office.js"), "utf8");
   assert.ok(!src.includes("models[a.role]"));
   assert.ok(!/const (ROLE|MODEL)\b/.test(src));
