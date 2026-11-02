@@ -12,3 +12,7 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+
+# software factory
+factory/jobs/
+.claude/worktrees/

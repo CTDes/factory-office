@@ -1,0 +1,41 @@
+{
+  "base_branch": "main",
+  "merge_method": "merge",
+  "concurrency": 1,
+  "max_rounds": 3,
+  "spec_branch_prefix": "spec/",
+  "job_branch_prefix": "factory/",
+  "worktrees_dir": ".claude/worktrees",
+  "labels": {
+    "queue": "ready-for-agent",
+    "spec": "spec",
+    "needs_info": "needs-info",
+    "needs_human": "ready-for-human",
+    "in_progress": "factory:working"
+  },
+  "models": {
+    "planner": "opus",
+    "builder": {
+      "low": "sonnet",
+      "medium": "sonnet",
+      "high": "opus"
+    },
+    "reviewer": {
+      "low": "haiku",
+      "medium": "sonnet",
+      "high": "sonnet"
+    },
+    "final_reviewer": "opus"
+  },
+  "always_human_surfaces": [],
+  "protected_paths": [
+    "factory/**",
+    ".github/**",
+    ".claude/**",
+    "tests/fixtures/**"
+    "tests/**"
+  ],
+  "checks_timeout_s": 900,
+  "log_tail_lines": 80,
+  "always_human_surfaces": ["ui"]
+}
