@@ -27,15 +27,14 @@
     },
     "final_reviewer": "opus"
   },
-  "always_human_surfaces": [],
+  "always_human_surfaces": ["ui"],
   "protected_paths": [
     "factory/**",
     ".github/**",
     ".claude/**",
-    "tests/fixtures/**"
+    "tests/fixtures/**",
     "tests/**"
   ],
   "checks_timeout_s": 900,
-  "log_tail_lines": 80,
-  "always_human_surfaces": ["ui"]
+  "log_tail_lines": 80
 }
