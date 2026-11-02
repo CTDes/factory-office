@@ -16,6 +16,12 @@ Allowed imports: `cli → server → store`, `cli → store`. `store` imports on
 In the browser: `office.js → client.js, model.js`; `model.js` imports nothing. Replacing the
 Canvas renderer (Phaser + Tiled) means replacing `office.js` only.
 
+## Deployment
+
+`Dockerfile` + `compose.yaml`: Python slim image, non-root user, read-only root filesystem, no
+capabilities, the database in the `office-data` volume, port published on 127.0.0.1 only and a
+healthcheck on `/health`.
+
 ## Where a job sits
 
 `model.placeFor(job)` maps the stage, and the claim from its latest `job.json`, to a zone and to
@@ -31,7 +37,7 @@ QA while its final gate runs), final-build → workshop.
 | `events` | every event once (`id` unique), with `seq` in arrival order and the raw JSON | ingest |
 | `jobs` | per `repo` + `job_id`: latest stage, `ts`, machine and last known `job.json` | ingest (projection) |
 | `repos` | per `repo` + `machine`: last time seen | ingest (projection) |
-| `tokens` | sha256 of each token, its name and role (`emit` or `view`) | `token add` |
+| `office` | the office token (one row, key `token`) | first start, `token --rotate` |
 
 Projection rule: an event updates its job only if its `ts` is not older than the stored one
 (ties go to the last received). An event without a snapshot moves the stage and keeps the

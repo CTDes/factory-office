@@ -1,4 +1,4 @@
-"""The SQLite store: validation, idempotent ingest, the per-job projection, queries, tokens."""
+"""The SQLite store: validation, idempotent ingest, the per-job projection, queries, the token."""
 
 from __future__ import annotations
 
@@ -171,33 +171,24 @@ class LastEventsTest(unittest.TestCase):
         self.assertEqual(store.last_events(conn, 2, job_id="nope"), [])
 
 
-class TokensTest(unittest.TestCase):
-    def test_add_check_rotate_remove(self) -> None:
+class OfficeTokenTest(unittest.TestCase):
+    def test_created_once_and_stable(self) -> None:
         conn = memory()
-        first = store.add_token(conn, "mac-1")
-        self.assertEqual(store.check_token(conn, first), store.Token("mac-1", "emit"))
-        second = store.add_token(conn, "mac-1")
-        self.assertIsNone(store.check_token(conn, first))
-        self.assertEqual(store.check_token(conn, second), store.Token("mac-1", "emit"))
-        self.assertEqual([t["name"] for t in store.list_tokens(conn)], ["mac-1"])
-        self.assertTrue(store.remove_token(conn, "mac-1"))
-        self.assertFalse(store.has_tokens(conn))
-        self.assertIsNone(store.check_token(conn, ""))
+        token = store.office_token(conn)
+        self.assertGreaterEqual(len(token), 40)
+        self.assertEqual(store.office_token(conn), token)
+        self.assertTrue(store.check_token(conn, token))
+        self.assertFalse(store.check_token(conn, token + "x"))
+        self.assertFalse(store.check_token(conn, ""))
 
-    def test_view_tokens_and_roles(self) -> None:
+    def test_rotate_invalidates_the_old_one(self) -> None:
         conn = memory()
-        token = store.add_token(conn, "alice", "view")
-        self.assertEqual(store.check_token(conn, token), store.Token("alice", "view"))
-        self.assertTrue(store.has_tokens(conn, "view"))
-        self.assertFalse(store.has_tokens(conn, "emit"))
-        with self.assertRaises(ValueError):
-            store.add_token(conn, "bob", "admin")
-
-    def test_only_the_hash_is_stored(self) -> None:
-        conn = memory()
-        token = store.add_token(conn, "mac-1")
-        dump = "\n".join(conn.iterdump())
-        self.assertNotIn(token, dump)
+        old = store.office_token(conn)
+        new = store.rotate_token(conn)
+        self.assertNotEqual(old, new)
+        self.assertFalse(store.check_token(conn, old))
+        self.assertTrue(store.check_token(conn, new))
+        self.assertEqual(store.office_token(conn), new)
 
 
 class JobStateTest(unittest.TestCase):
@@ -213,21 +204,21 @@ class JobStateTest(unittest.TestCase):
 
 
 class ConnectTest(unittest.TestCase):
-    def test_migrates_tokens_from_0_1_0(self) -> None:
+    def test_drops_per_machine_tokens_from_0_2_0(self) -> None:
         path = Path(tempfile.mkdtemp()) / "old.db"
         old = sqlite3.connect(path)
         old.executescript(
             "CREATE TABLE tokens (hash TEXT PRIMARY KEY, machine TEXT NOT NULL UNIQUE,"
-            " created_at TEXT NOT NULL);"
-            "INSERT INTO tokens VALUES ('h', 'mac-1', 't');"
+            " role TEXT NOT NULL DEFAULT 'emit', created_at TEXT NOT NULL);"
+            "INSERT INTO tokens VALUES ('h', 'mac-1', 'emit', 't');"
         )
         old.commit()
         old.close()
         conn = store.connect(path)
         self.addCleanup(conn.close)
-        self.assertEqual(
-            store.list_tokens(conn), [{"name": "mac-1", "role": "emit", "created_at": "t"}]
-        )
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertNotIn("tokens", tables)
+        self.assertTrue(store.office_token(conn))
 
     def test_creates_parent_folders_and_survives_reopen(self) -> None:
         path = Path(tempfile.mkdtemp()) / "deep" / "office.db"

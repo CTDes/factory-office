@@ -3,13 +3,16 @@
 Standard library only (ThreadingHTTPServer). Every request opens its own SQLite connection, so
 handlers share nothing but the database file.
 
-  GET  /                                     the office page (no auth; it asks for a token)
-  GET  /static/<file>                        the page's scripts and styles (no auth)
-  GET  /health                               no auth; {"ok": true}
-  POST /events   {"events": [...]}           emit token; {"accepted": n, "duplicates": m}
-  GET  /state                                any token; repos, every job, last seq
-  GET  /events?after=&limit=&last=&repo=&job_id=   any token; events in arrival order
-  GET  /stream?after=SEQ                     any token; Server-Sent Events, one per new event
+Every data route needs the office token (``Authorization: Bearer <token>``); there is one.
+
+  GET  /                                     the office page (it asks for the token)
+  GET  /static/<file>                        the page's scripts and styles
+  GET  /health                               {"ok": true}
+  POST /events   {"events": [...]}           {"accepted": n, "duplicates": m}; an empty batch
+                                             is how a factory checks its link
+  GET  /state                                repos, every job, last seq
+  GET  /events?after=&limit=&last=&repo=&job_id=   events in arrival order
+  GET  /stream?after=SEQ                     Server-Sent Events, one per new event
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ MAX_BODY = 8 * 1024 * 1024
 MAX_BATCH = 1000
 STREAM_POLL_S = 1.0
 STREAM_PING_S = 15.0
+SENDER = "office-token"  # recorded per event; one token means no per-machine identity
 
 _TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -64,7 +68,11 @@ class OfficeServer(ThreadingHTTPServer):
         self.quiet = quiet
         self.stopping = threading.Event()
         self.web = _web_files()
-        store.connect(db_path).close()  # create or migrate the schema before the first request
+        conn = store.connect(db_path)  # create or migrate the schema before the first request
+        try:
+            store.office_token(conn)
+        finally:
+            conn.close()
         super().__init__(address, Handler)
 
     def server_close(self) -> None:
@@ -74,7 +82,7 @@ class OfficeServer(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     server: OfficeServer
-    server_version = "factory-office/0.2.0"
+    server_version = "factory-office/0.3.0"
 
     # ------------------------------------------------------------ plumbing
 
@@ -99,22 +107,18 @@ class Handler(BaseHTTPRequestHandler):
         headers = {"WWW-Authenticate": "Bearer"} if status == HTTPStatus.UNAUTHORIZED else None
         self._send(status, {"error": message, **extra}, headers)
 
-    def _token(self, role: str | None = None) -> store.Token | None:
-        """The caller's token, or None after answering 401/403."""
+    def _token(self) -> bool:
+        """True when the caller sent the office token; otherwise answers 401 and returns False."""
         header = self.headers.get("Authorization", "")
         raw = header[7:].strip() if header.lower().startswith("bearer ") else ""
         conn = store.connect(self.server.db_path)
         try:
-            token = store.check_token(conn, raw)
+            ok = store.check_token(conn, raw)
         finally:
             conn.close()
-        if token is None:
-            self._error(HTTPStatus.UNAUTHORIZED, "missing or unknown token")
-            return None
-        if role is not None and token.role != role:
-            self._error(HTTPStatus.FORBIDDEN, f"this route needs a token with role '{role}'")
-            return None
-        return token
+        if not ok:
+            self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong office token")
+        return ok
 
     def log_message(self, format: str, *args: Any) -> None:
         if not self.server.quiet:
@@ -231,8 +235,7 @@ class Handler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path != "/events":
             self._error(HTTPStatus.NOT_FOUND, f"no route {self.path}")
             return
-        token = self._token(role="emit")
-        if token is None:
+        if not self._token():
             return
         length_header = self.headers.get("Content-Length")
         if length_header is None:
@@ -260,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = store.connect(self.server.db_path)
         try:
-            result = store.ingest(conn, batch, token.name)
+            result = store.ingest(conn, batch, SENDER)
         except store.InvalidEvent as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc), index=exc.index)
             return

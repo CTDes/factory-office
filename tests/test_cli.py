@@ -30,23 +30,16 @@ class CliTestCase(unittest.TestCase):
 
 
 class TokenCommandTest(CliTestCase):
-    def test_add_prints_token_once_and_list_hides_it(self) -> None:
-        code, out, err = run("--db", self.db, "token", "add", "mac-1")
+    def test_shows_the_same_token_until_rotated(self) -> None:
+        code, out, _ = run("--db", self.db, "token")
         token = out.strip()
         self.assertEqual(code, 0)
-        self.assertIn("FACTORY_EVENTS_TOKEN", err)
-        code, out, _ = run("--db", self.db, "token", "list")
-        self.assertIn("mac-1", out)
-        self.assertNotIn(token, out)
-        self.assertEqual(run("--db", self.db, "token", "remove", "mac-1")[0], 0)
-        self.assertEqual(run("--db", self.db, "token", "remove", "mac-1")[0], 1)
-        self.assertEqual(run("--db", self.db, "token", "add")[0], 2)
-
-    def test_view_tokens(self) -> None:
-        code, _, err = run("--db", self.db, "token", "add", "alice", "--view")
+        self.assertEqual(run("--db", self.db, "token")[1].strip(), token)
+        code, out, err = run("--db", self.db, "token", "--rotate")
         self.assertEqual(code, 0)
-        self.assertIn("view token for alice", err)
-        self.assertIn("view", run("--db", self.db, "token", "list")[1])
+        self.assertNotEqual(out.strip(), token)
+        self.assertIn("link again", err)
+        self.assertEqual(run("--db", self.db, "token")[1].strip(), out.strip())
 
 
 class StateCommandTest(CliTestCase):

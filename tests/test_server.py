@@ -25,8 +25,7 @@ class ServerTestCase(unittest.TestCase):
         self.addCleanup(self.srv.server_close)
         self.addCleanup(self.srv.shutdown)
         conn = store.connect(self.db)
-        self.token = store.add_token(conn, "mac-1")
-        self.viewer = store.add_token(conn, "alice", "view")
+        self.token = store.office_token(conn)
         conn.close()
 
     def call(
@@ -128,13 +127,19 @@ class GetEventsTest(ServerTestCase):
         self.assertEqual(self.call("GET", "/events?after=x")[0], 400)
 
 
-class RolesTest(ServerTestCase):
-    def test_view_token_reads_but_cannot_send(self) -> None:
-        status, body = self.call("POST", "/events", {"events": [event()]}, token=self.viewer)
-        self.assertEqual(status, 403)
-        self.assertIn("emit", body["error"])
-        self.assertEqual(self.call("GET", "/state", token=self.viewer)[0], 200)
-        self.assertEqual(self.call("GET", "/events", token=self.viewer)[0], 200)
+class LinkCheckTest(ServerTestCase):
+    def test_empty_batch_is_how_a_factory_checks_its_link(self) -> None:
+        self.assertEqual(
+            self.call("POST", "/events", {"events": []}), (200, {"accepted": 0, "duplicates": 0})
+        )
+        self.assertEqual(self.call("POST", "/events", {"events": []}, token="wrong")[0], 401)
+
+    def test_rotated_token_stops_working(self) -> None:
+        conn = store.connect(self.db)
+        new = store.rotate_token(conn)
+        conn.close()
+        self.assertEqual(self.call("GET", "/state")[0], 401)
+        self.assertEqual(self.call("GET", "/state", token=new)[0], 200)
 
 
 class GetEventsFiltersTest(ServerTestCase):
@@ -191,7 +196,7 @@ class StreamTest(ServerTestCase):
         self, path: str, count: int, token: str | None = None
     ) -> list[dict[str, Any]]:
         req = urllib.request.Request(self.base + path)
-        req.add_header("Authorization", f"Bearer {token or self.viewer}")
+        req.add_header("Authorization", f"Bearer {token or self.token}")
         messages: list[dict[str, Any]] = []
         with urllib.request.urlopen(req, timeout=5) as resp:
             self.assertIn("text/event-stream", resp.headers["Content-Type"])

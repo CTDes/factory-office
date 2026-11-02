@@ -24,19 +24,19 @@
     <div class="chips" id="chips" aria-label="Jobs per stage across every repository"></div>
 
     <form class="login" id="login" hidden>
-      <label for="token">Viewer token</label>
-      <p>Create one on the collector with <code>factory-office token add &lt;your-name&gt; --view</code> and paste it here. It stays in this browser.</p>
+      <label for="token">Office token</label>
+      <p>The same token the factories link with. Show it with <code>docker compose exec office factory-office token</code> (or <code>factory-office token</code> without Docker) and paste it here. It stays in this browser.</p>
       <div class="row">
         <input id="token" type="password" autocomplete="off" spellcheck="false" required>
         <button type="submit">Open the office</button>
       </div>
-      <p class="err" id="login-error" hidden>That token was rejected. Check that it is a viewer or machine token from this collector.</p>
+      <p class="err" id="login-error" hidden>That token was rejected. It may have been rotated: show the current one again.</p>
     </form>
 
     <main class="grid" id="main" hidden>
       <section class="floor" aria-label="Office">
         <div id="rooms" class="rooms"></div>
-        <p class="empty" id="empty" hidden>No events yet. On each machine set <code>FACTORY_EVENTS_URL</code> to this collector's <code>/events</code> and <code>FACTORY_EVENTS_TOKEN</code> to its machine token, then run <code>factory-job events backfill</code> in each repository.</p>
+        <p class="empty" id="empty" hidden>No events yet. In each repository you want to see, run <code>factory-job office link &lt;office-token&gt;</code> (add <code>--url http://host:8765</code> when the office runs on another machine).</p>
         <div class="legend" aria-label="Legend">
           <span><i class="sw planner"></i>planner</span>
           <span><i class="sw builder"></i>builder</span>

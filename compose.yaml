@@ -1,0 +1,23 @@
+# docker compose up -d                      start the office on http://127.0.0.1:8765/
+# docker compose exec office factory-office token     show the office token
+services:
+  office:
+    build: .
+    image: factory-office:local
+    restart: unless-stopped
+    ports:
+      # Only this machine can reach it. To serve other machines, put a TLS proxy in front
+      # (or change this to "8765:8765" on a trusted network).
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - office-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  office-data:

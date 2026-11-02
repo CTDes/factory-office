@@ -15,31 +15,38 @@ CI runner: factory-job ──POST /events──┘                              
 
 ## Run it
 
-Python 3.10+, standard library only.
+With Docker (isolated: its own volume for the database, published on 127.0.0.1 only):
 
 ```sh
-pip install -e .                       # or: PYTHONPATH=src python3 -m factory_office ...
-factory-office token add my-laptop     # machine token: sends events; printed once
-factory-office token add carlos --view # viewer token: only reads; for the office page
-factory-office serve                   # http://127.0.0.1:8765, db in ~/.local/share/factory-office/
+docker compose up -d                                   # http://127.0.0.1:8765/
+docker compose exec office factory-office token        # the office token
 ```
 
-On each machine that runs the factory, set once in `~/.claude/settings.json`:
+The office has a single token, created on first start. Whoever knows it can link a repository
+and open the page. `factory-office token --rotate` replaces it; linked repositories then get 401
+and must link again.
 
-```json
-{ "env": { "FACTORY_EVENTS_URL": "http://127.0.0.1:8765/events", "FACTORY_EVENTS_TOKEN": "<token>" } }
-```
-
-Then, in each repository that already has jobs, send its history once:
+In each repository you want to see (software-factory 0.4.0 or later):
 
 ```sh
-factory-job events backfill
+factory-job office link <office-token>                         # office on this machine
+factory-job office link <office-token> --url http://nas:8765   # office on another machine
 ```
+
+That checks the office accepts the token, saves the link (gitignored), and sends the repository's
+history. `factory-job office status` and `office unlink` do what they say.
+
+Without Docker: `pip install -e .` and `factory-office serve` (database in
+`~/.local/share/factory-office/`, or `$FACTORY_OFFICE_DB`).
+
+To reach it from other machines, publish the port beyond 127.0.0.1 only behind TLS or on a
+network you trust: the token travels in a header.
 
 ## Look at it
 
-Open `http://127.0.0.1:8765/` and paste a viewer token, or open `http://127.0.0.1:8765/#token=<token>`
-once: the page keeps the token in the browser and removes it from the address bar.
+Open `http://127.0.0.1:8765/` and paste the office token, or open
+`http://127.0.0.1:8765/#token=<token>` once: the page keeps the token in the browser and removes
+it from the address bar.
 
 - **Rooms**: reception (planner), waiting chairs (`needs-info`), workshop (two builders, queue on
   the floor), QA conveyor with a traffic light that flashes on gate verdicts, review desk, elevator
@@ -62,15 +69,13 @@ factory-office tail -f        # every transition as it arrives, like events.log 
 | Route | Auth | Answer |
 | --- | --- | --- |
 | `GET /health` | none | `{"ok": true}` |
-| `POST /events` | token | body `{"events": [...]}`; `{"accepted": n, "duplicates": m}` |
-| `GET /state` | any token | `{"repos": [...], "jobs": [...], "seq": n}`, each job with its latest `job.json` |
-| `GET /events?after=&limit=&last=&repo=&job_id=` | any token | events in arrival order |
-| `GET /stream?after=SEQ` | any token | Server-Sent Events: each new event with its job's and repo's new state |
-| `GET /`, `GET /static/<file>` | none | the office page; it asks for a token |
+| `POST /events` | token | body `{"events": [...]}`; `{"accepted": n, "duplicates": m}`. An empty batch checks a link |
+| `GET /state` | token | `{"repos": [...], "jobs": [...], "seq": n}`, each job with its latest `job.json` |
+| `GET /events?after=&limit=&last=&repo=&job_id=` | token | events in arrival order |
+| `GET /stream?after=SEQ` | token | Server-Sent Events: each new event with its job's and repo's new state |
+| `GET /`, `GET /static/<file>` | none | the office page; it asks for the token |
 
-`POST /events` needs a machine token (role `emit`); viewer tokens (`--view`) only read. Only token
-hashes are stored. The page is served with a strict Content-Security-Policy (`'self'` only). It serves plain
-HTTP: bind it to 127.0.0.1 or put TLS in front before exposing it.
+The page is served with a strict Content-Security-Policy (`'self'` only).
 
 The event format is defined by software-factory (DESIGN.md · Events); see
 [ADR 0001](docs/adr/0001-events-are-owned-by-the-factory.md).

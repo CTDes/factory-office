@@ -7,7 +7,7 @@ that can be deleted and rebuilt with ``factory-job events backfill`` in each rep
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
+import hmac
 import json
 import secrets
 import sqlite3
@@ -58,11 +58,9 @@ CREATE TABLE IF NOT EXISTS repos (
     PRIMARY KEY (repo, machine)
 );
 
-CREATE TABLE IF NOT EXISTS tokens (
-    hash       TEXT PRIMARY KEY,
-    machine    TEXT NOT NULL UNIQUE,  -- the token's name: a machine, or a viewer
-    role       TEXT NOT NULL DEFAULT 'emit',
-    created_at TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS office (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -121,9 +119,8 @@ def connect(path: Path | str) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Bring databases created by older versions up to the current schema."""
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(tokens)")}
-    if "role" not in columns:  # 0.1.0: every token could send events
-        conn.execute("ALTER TABLE tokens ADD COLUMN role TEXT NOT NULL DEFAULT 'emit'")
+    # 0.1.0 and 0.2.0 had one token per machine or viewer; 0.3.0 has a single office token.
+    conn.execute("DROP TABLE IF EXISTS tokens")
 
 
 def _now() -> str:
@@ -386,62 +383,36 @@ def _event_row(r: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------- tokens
-
-ROLES = ("emit", "view")
+# ---------------------------------------------------------------- the office token
 
 
-@dataclass(frozen=True)
-class Token:
-    """Who is calling. ``emit`` tokens send events (one per machine); ``view`` tokens only read."""
+def office_token(conn: sqlite3.Connection) -> str:
+    """The office's single token, created on first use.
 
-    name: str
-    role: str
-
-
-def _hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def add_token(conn: sqlite3.Connection, name: str, role: str = "emit") -> str:
-    """Create (or rotate) a named token. Only its hash is stored."""
-    if not name.strip():
-        raise ValueError("token name must not be empty")
-    if role not in ROLES:
-        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    Every factory links with it and the page signs in with it. It is stored in clear so the
+    owner can read it back; whoever can read this database can read the events anyway.
+    """
+    row = conn.execute("SELECT value FROM office WHERE key = 'token'").fetchone()
+    if row:
+        return str(row["value"])
     token = secrets.token_urlsafe(32)
-    conn.execute("DELETE FROM tokens WHERE machine = ?", (name,))
+    conn.execute("INSERT OR IGNORE INTO office (key, value) VALUES ('token', ?)", (token,))
+    return str(conn.execute("SELECT value FROM office WHERE key = 'token'").fetchone()["value"])
+
+
+def rotate_token(conn: sqlite3.Connection) -> str:
+    """Replace the office token. Every linked factory must link again."""
+    token = secrets.token_urlsafe(32)
     conn.execute(
-        "INSERT INTO tokens (hash, machine, role, created_at) VALUES (?, ?, ?, ?)",
-        (_hash(token), name, role, _now()),
+        "INSERT INTO office (key, value) VALUES ('token', ?)"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (token,),
     )
     return token
 
 
-def check_token(conn: sqlite3.Connection, token: str) -> Token | None:
-    """The token's name and role, or None if it is unknown."""
-    if not token:
-        return None
-    row = conn.execute(
-        "SELECT machine, role FROM tokens WHERE hash = ?", (_hash(token),)
-    ).fetchone()
-    return Token(name=str(row["machine"]), role=str(row["role"])) if row else None
-
-
-def list_tokens(conn: sqlite3.Connection) -> list[dict[str, str]]:
-    return [
-        {"name": r["machine"], "role": r["role"], "created_at": r["created_at"]}
-        for r in conn.execute("SELECT machine, role, created_at FROM tokens ORDER BY machine")
-    ]
-
-
-def remove_token(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute("DELETE FROM tokens WHERE machine = ?", (name,)).rowcount > 0
-
-
-def has_tokens(conn: sqlite3.Connection, role: str | None = None) -> bool:
-    if role is None:
-        return conn.execute("SELECT 1 FROM tokens LIMIT 1").fetchone() is not None
-    return (
-        conn.execute("SELECT 1 FROM tokens WHERE role = ? LIMIT 1", (role,)).fetchone() is not None
-    )
+def check_token(conn: sqlite3.Connection, candidate: str) -> bool:
+    """True when ``candidate`` is the office token (constant-time comparison)."""
+    if not candidate:
+        return False
+    return hmac.compare_digest(candidate.encode("utf-8"), office_token(conn).encode("utf-8"))
