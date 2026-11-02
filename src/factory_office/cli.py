@@ -108,10 +108,16 @@ def cmd_serve(args: argparse.Namespace) -> int:
     srv = server.OfficeServer((args.host, args.port), args.db, quiet=not args.verbose)
     conn = store.connect(args.db)
     try:
-        if not store.has_tokens(conn):
+        if not store.has_tokens(conn, "emit"):
             print(
-                "factory-office: no tokens yet, every request will get 401. "
+                "factory-office: no machine tokens yet; factories will get 401. "
                 "Create one with: factory-office token add <machine>",
+                file=sys.stderr,
+            )
+        if not store.has_tokens(conn, "view"):
+            print(
+                "factory-office: no viewer tokens yet. For the office page: "
+                "factory-office token add <name> --view",
                 file=sys.stderr,
             )
     finally:
@@ -119,7 +125,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("factory-office: plain HTTP on a public interface; put TLS in front", file=sys.stderr)
     host, port = srv.server_address[:2]
-    print(f"factory-office: listening on http://{host!s}:{port} · db {args.db}", flush=True)
+    print(f"factory-office: office at http://{host!s}:{port}/ · db {args.db}", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -132,26 +138,28 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_token(args: argparse.Namespace) -> int:
     def run(conn: sqlite3.Connection) -> int:
         if args.action == "add":
-            if not args.machine:
-                print("factory-office: token add needs a machine name", file=sys.stderr)
+            if not args.name:
+                print("factory-office: token add needs a name", file=sys.stderr)
                 return 2
-            token = store.add_token(conn, args.machine)
+            role = "view" if args.view else "emit"
+            token = store.add_token(conn, args.name, role)
             print(token)
-            print(
-                f"Token for {args.machine}. It is shown only once; on that machine set "
-                "FACTORY_EVENTS_TOKEN to it.",
-                file=sys.stderr,
+            hint = (
+                "paste it in the office page when it asks"
+                if args.view
+                else "on that machine set FACTORY_EVENTS_TOKEN to it"
             )
+            print(f"{role} token for {args.name}, shown only once: {hint}.", file=sys.stderr)
             return 0
         if args.action == "remove":
-            if not args.machine or not store.remove_token(conn, args.machine):
-                print(f"factory-office: no token for {args.machine!r}", file=sys.stderr)
+            if not args.name or not store.remove_token(conn, args.name):
+                print(f"factory-office: no token named {args.name!r}", file=sys.stderr)
                 return 1
-            print(f"removed token for {args.machine}")
+            print(f"removed token {args.name}")
             return 0
         rows = store.list_tokens(conn)
         for row in rows:
-            print(f"{row['machine']:<30} {row['created_at']}")
+            print(f"{row['name']:<30} {row['role']:<5} {row['created_at']}")
         if not rows:
             print("no tokens")
         return 0
@@ -209,9 +217,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--verbose", action="store_true", help="log every request")
     s.set_defaults(fn=cmd_serve)
 
-    t = sub.add_parser("token", help="manage the token of each machine")
+    t = sub.add_parser("token", help="tokens: one per machine (emit) or per viewer (--view)")
     t.add_argument("action", choices=["add", "list", "remove"])
-    t.add_argument("machine", nargs="?")
+    t.add_argument("name", nargs="?", help="machine or viewer name")
+    t.add_argument("--view", action="store_true", help="read-only token for the office page")
     t.set_defaults(fn=cmd_token)
 
     st = sub.add_parser("state", help="latest state of every repo and job")

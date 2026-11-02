@@ -26,6 +26,7 @@ class ServerTestCase(unittest.TestCase):
         self.addCleanup(self.srv.shutdown)
         conn = store.connect(self.db)
         self.token = store.add_token(conn, "mac-1")
+        self.viewer = store.add_token(conn, "alice", "view")
         conn.close()
 
     def call(
@@ -125,6 +126,112 @@ class GetEventsTest(ServerTestCase):
         rest = self.call("GET", f"/events?after={first[-1]['seq']}")[1]["events"]
         self.assertEqual([e["seq"] for e in rest], [3])
         self.assertEqual(self.call("GET", "/events?after=x")[0], 400)
+
+
+class RolesTest(ServerTestCase):
+    def test_view_token_reads_but_cannot_send(self) -> None:
+        status, body = self.call("POST", "/events", {"events": [event()]}, token=self.viewer)
+        self.assertEqual(status, 403)
+        self.assertIn("emit", body["error"])
+        self.assertEqual(self.call("GET", "/state", token=self.viewer)[0], 200)
+        self.assertEqual(self.call("GET", "/events", token=self.viewer)[0], 200)
+
+
+class GetEventsFiltersTest(ServerTestCase):
+    def test_last_and_job_filter(self) -> None:
+        evs = [event(i) for i in range(1, 4)] + [event(9, job_id="099-other")]
+        self.call("POST", "/events", {"events": evs})
+        last = self.call("GET", "/events?last=2")[1]["events"]
+        self.assertEqual([e["seq"] for e in last], [3, 4])
+        only = self.call("GET", "/events?job_id=099-other&repo=CTDes/textkit")[1]["events"]
+        self.assertEqual([e["job_id"] for e in only], ["099-other"])
+
+
+class StaticTest(ServerTestCase):
+    def fetch(self, path: str) -> tuple[int, dict[str, str], bytes]:
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=5) as resp:
+                return resp.status, dict(resp.headers), resp.read()
+        except urllib.error.HTTPError as err:
+            with err:
+                return err.code, dict(err.headers), err.read()
+
+    def test_page_needs_no_token_and_carries_a_strict_csp(self) -> None:
+        status, headers, body = self.fetch("/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn(b"/static/office.js", body)
+
+    def test_scripts_are_served_with_their_type(self) -> None:
+        for name in ("model.js", "client.js", "office.js", "office.css"):
+            status, _headers, body = self.fetch("/static/" + name)
+            self.assertEqual(status, 200, name)
+            self.assertTrue(body)
+        self.assertIn("javascript", self.fetch("/static/model.js")[1]["Content-Type"])
+
+    def test_only_known_files(self) -> None:
+        for path in (
+            "/static/../store.py",
+            "/static/%2e%2e/store.py",
+            "/static/nope.js",
+            "/static/",
+        ):
+            self.assertEqual(self.fetch(path)[0], 404, path)
+
+
+class StreamTest(ServerTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        original = server.STREAM_POLL_S
+        server.STREAM_POLL_S = 0.05
+        self.addCleanup(setattr, server, "STREAM_POLL_S", original)
+
+    def read_messages(
+        self, path: str, count: int, token: str | None = None
+    ) -> list[dict[str, Any]]:
+        req = urllib.request.Request(self.base + path)
+        req.add_header("Authorization", f"Bearer {token or self.viewer}")
+        messages: list[dict[str, Any]] = []
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            self.assertIn("text/event-stream", resp.headers["Content-Type"])
+            data = None
+            while len(messages) < count:
+                line = resp.readline().decode().rstrip("\n")
+                if line.startswith("data: "):
+                    data = line[6:]
+                elif line == "" and data is not None:
+                    messages.append(json.loads(data))
+                    data = None
+        return messages
+
+    def test_sends_events_after_seq_with_job_state(self) -> None:
+        self.call(
+            "POST",
+            "/events",
+            {
+                "events": [
+                    event(1),
+                    event(2, ts="2026-11-02T10:05:00+01:00", frm="build", to="gate"),
+                ]
+            },
+        )
+        (msg,) = self.read_messages("/stream?after=1", 1)
+        self.assertEqual(msg["event"]["seq"], 2)
+        self.assertEqual(msg["job"]["stage"], "gate")
+        self.assertEqual(msg["repos"][0]["repo"], "CTDes/textkit")
+
+    def test_delivers_events_posted_while_connected(self) -> None:
+        def post_later() -> None:
+            threading.Event().wait(0.2)
+            self.call("POST", "/events", {"events": [event(7)]})
+
+        threading.Thread(target=post_later, daemon=True).start()
+        (msg,) = self.read_messages("/stream?after=0", 1)
+        self.assertEqual(msg["event"]["id"], event(7)["id"])
+
+    def test_needs_a_token(self) -> None:
+        self.assertEqual(self.call("GET", "/stream", token=None)[0], 401)
 
 
 if __name__ == "__main__":

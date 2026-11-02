@@ -21,4 +21,7 @@ Collector and (soon) office view for software-factory events. Standard library o
 - Tests use `unittest`, one `TestCase` per public function or route, named `test_<behaviour>`.
   `tests/fixtures/events_v1.jsonl` holds real events built by the factory's own emitter; regenerate
   it, never hand-edit it, when the factory's format changes.
+- Web: no inline scripts or styles (the page has CSP `'self'`); build DOM with `office.js`'s `h()`
+  helper, never `innerHTML`. Office logic belongs in `web/model.js`, tested in `tests/js/`; the
+  renderer only draws.
 - Architecture decisions: `docs/adr/`.

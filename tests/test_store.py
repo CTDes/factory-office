@@ -10,9 +10,18 @@ from pathlib import Path
 from factory_office import store
 from helpers import event, fixture_events
 
+_OPEN: list[sqlite3.Connection] = []
+
 
 def memory() -> sqlite3.Connection:
-    return store.connect(":memory:")
+    conn = store.connect(":memory:")
+    _OPEN.append(conn)
+    return conn
+
+
+def tearDownModule() -> None:
+    for conn in _OPEN:
+        conn.close()
 
 
 class ValidateTest(unittest.TestCase):
@@ -136,7 +145,7 @@ class StateTest(unittest.TestCase):
         )
 
     def test_empty_database(self) -> None:
-        self.assertEqual(store.state(memory()), {"repos": [], "jobs": []})
+        self.assertEqual(store.state(memory()), {"repos": [], "jobs": [], "seq": 0})
 
 
 class EventsAfterTest(unittest.TestCase):
@@ -148,6 +157,10 @@ class EventsAfterTest(unittest.TestCase):
         rest = store.events_after(conn, first[-1]["seq"])
         self.assertEqual([e["seq"] for e in rest], [3, 4, 5, 6])
         self.assertEqual({e["repo"] for e in store.events_after(conn, 0, repo="b/y")}, {"b/y"})
+        store.ingest(conn, [event(9, job_id="099-other")], "s")
+        self.assertEqual(
+            [e["job_id"] for e in store.events_after(conn, 0, job_id="099-other")], ["099-other"]
+        )
 
 
 class LastEventsTest(unittest.TestCase):
@@ -155,20 +168,30 @@ class LastEventsTest(unittest.TestCase):
         conn = memory()
         store.ingest(conn, [event(i) for i in range(1, 6)], "s")
         self.assertEqual([e["seq"] for e in store.last_events(conn, 2)], [4, 5])
+        self.assertEqual(store.last_events(conn, 2, job_id="nope"), [])
 
 
 class TokensTest(unittest.TestCase):
     def test_add_check_rotate_remove(self) -> None:
         conn = memory()
         first = store.add_token(conn, "mac-1")
-        self.assertEqual(store.check_token(conn, first), "mac-1")
+        self.assertEqual(store.check_token(conn, first), store.Token("mac-1", "emit"))
         second = store.add_token(conn, "mac-1")
         self.assertIsNone(store.check_token(conn, first))
-        self.assertEqual(store.check_token(conn, second), "mac-1")
-        self.assertEqual([t["machine"] for t in store.list_tokens(conn)], ["mac-1"])
+        self.assertEqual(store.check_token(conn, second), store.Token("mac-1", "emit"))
+        self.assertEqual([t["name"] for t in store.list_tokens(conn)], ["mac-1"])
         self.assertTrue(store.remove_token(conn, "mac-1"))
         self.assertFalse(store.has_tokens(conn))
         self.assertIsNone(store.check_token(conn, ""))
+
+    def test_view_tokens_and_roles(self) -> None:
+        conn = memory()
+        token = store.add_token(conn, "alice", "view")
+        self.assertEqual(store.check_token(conn, token), store.Token("alice", "view"))
+        self.assertTrue(store.has_tokens(conn, "view"))
+        self.assertFalse(store.has_tokens(conn, "emit"))
+        with self.assertRaises(ValueError):
+            store.add_token(conn, "bob", "admin")
 
     def test_only_the_hash_is_stored(self) -> None:
         conn = memory()
@@ -177,13 +200,43 @@ class TokensTest(unittest.TestCase):
         self.assertNotIn(token, dump)
 
 
+class JobStateTest(unittest.TestCase):
+    def test_one_job_and_its_repo(self) -> None:
+        conn = memory()
+        store.ingest(conn, [event(1)], "s")
+        job = store.job_state(conn, "CTDes/textkit", "012-reading-time")
+        assert job is not None
+        self.assertEqual(job["stage"], "build")
+        self.assertIsNone(store.job_state(conn, "CTDes/textkit", "nope"))
+        self.assertEqual([r["machine"] for r in store.repo_state(conn, "CTDes/textkit")], ["mac-1"])
+        self.assertEqual(store.state(conn)["seq"], 1)
+
+
 class ConnectTest(unittest.TestCase):
+    def test_migrates_tokens_from_0_1_0(self) -> None:
+        path = Path(tempfile.mkdtemp()) / "old.db"
+        old = sqlite3.connect(path)
+        old.executescript(
+            "CREATE TABLE tokens (hash TEXT PRIMARY KEY, machine TEXT NOT NULL UNIQUE,"
+            " created_at TEXT NOT NULL);"
+            "INSERT INTO tokens VALUES ('h', 'mac-1', 't');"
+        )
+        old.commit()
+        old.close()
+        conn = store.connect(path)
+        self.addCleanup(conn.close)
+        self.assertEqual(
+            store.list_tokens(conn), [{"name": "mac-1", "role": "emit", "created_at": "t"}]
+        )
+
     def test_creates_parent_folders_and_survives_reopen(self) -> None:
         path = Path(tempfile.mkdtemp()) / "deep" / "office.db"
         conn = store.connect(path)
         store.ingest(conn, [event(1)], "s")
         conn.close()
-        self.assertEqual(len(store.events_after(store.connect(path))), 1)
+        again = store.connect(path)
+        self.addCleanup(again.close)
+        self.assertEqual(len(store.events_after(again)), 1)
 
 
 if __name__ == "__main__":

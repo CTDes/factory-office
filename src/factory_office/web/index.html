@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Factory Office</title>
+  <link rel="stylesheet" href="/static/office.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <h1>Factory <span>Office</span></h1>
+        <p>Every repository running the software factory, one room each. Folders are jobs moving through the state machine; people at their desks are agents working on them right now.</p>
+      </div>
+      <div class="controls">
+        <span class="status" id="status" data-state="connecting">connecting</span>
+        <span class="clock" id="clock">--:--:--</span>
+        <button type="button" class="ghost" id="signout">Forget token</button>
+      </div>
+    </header>
+
+    <div class="chips" id="chips" aria-label="Jobs per stage across every repository"></div>
+
+    <form class="login" id="login" hidden>
+      <label for="token">Viewer token</label>
+      <p>Create one on the collector with <code>factory-office token add &lt;your-name&gt; --view</code> and paste it here. It stays in this browser.</p>
+      <div class="row">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" required>
+        <button type="submit">Open the office</button>
+      </div>
+      <p class="err" id="login-error" hidden>That token was rejected. Check that it is a viewer or machine token from this collector.</p>
+    </form>
+
+    <main class="grid" id="main" hidden>
+      <section class="floor" aria-label="Office">
+        <div id="rooms" class="rooms"></div>
+        <p class="empty" id="empty" hidden>No events yet. On each machine set <code>FACTORY_EVENTS_URL</code> to this collector's <code>/events</code> and <code>FACTORY_EVENTS_TOKEN</code> to its machine token, then run <code>factory-job events backfill</code> in each repository.</p>
+        <div class="legend" aria-label="Legend">
+          <span><i class="sw planner"></i>planner</span>
+          <span><i class="sw builder"></i>builder</span>
+          <span><i class="sw reviewer"></i>reviewer</span>
+          <span>Hat = model:</span>
+          <span><i class="sw haiku"></i>haiku</span>
+          <span><i class="sw sonnet"></i>sonnet</span>
+          <span><i class="sw opus"></i>opus</span>
+          <span>Folder tab = risk:</span>
+          <span><i class="sw low"></i>low</span>
+          <span><i class="sw medium"></i>medium</span>
+          <span><i class="sw high"></i>high</span>
+        </div>
+        <div class="feed">
+          <h3>Events · every repository</h3>
+          <div class="feed-scroll"><ol id="feed"></ol></div>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Selected job">
+        <h3>Selected job</h3>
+        <div class="detail" id="detail"></div>
+        <div class="joblist">
+          <h3>Active jobs</h3>
+          <ul id="joblist"></ul>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/model.js"></script>
+  <script src="/static/client.js"></script>
+  <script src="/static/office.js"></script>
+</body>
+</html>

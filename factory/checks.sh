@@ -36,6 +36,13 @@ step "typecheck"
 step "tests"
 PYTHONPATH=src "$PY" -m unittest discover -s tests -v
 
+step "tests (web model)"
+if command -v node >/dev/null 2>&1; then
+  node --test tests/js/*.test.js
+else
+  echo "node not found: skipping the JavaScript model tests (CI runs them)"
+fi
+
 step "build"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT

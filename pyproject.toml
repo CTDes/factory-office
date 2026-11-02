@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "factory-office"
-version = "0.1.0"
+version = "0.2.0"
 description = "Collector and office view for software-factory events from every repository and machine"
 requires-python = ">=3.10"
 license = "MIT"
@@ -14,6 +14,9 @@ factory-office = "factory_office.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+factory_office = ["py.typed", "web/*.html", "web/*.js", "web/*.css"]
 
 [tool.ruff]
 line-length = 100

@@ -42,6 +42,12 @@ class TokenCommandTest(CliTestCase):
         self.assertEqual(run("--db", self.db, "token", "remove", "mac-1")[0], 1)
         self.assertEqual(run("--db", self.db, "token", "add")[0], 2)
 
+    def test_view_tokens(self) -> None:
+        code, _, err = run("--db", self.db, "token", "add", "alice", "--view")
+        self.assertEqual(code, 0)
+        self.assertIn("view token for alice", err)
+        self.assertIn("view", run("--db", self.db, "token", "list")[1])
+
 
 class StateCommandTest(CliTestCase):
     def test_groups_active_jobs_by_repo_and_counts_finished(self) -> None:

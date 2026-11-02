@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE TABLE IF NOT EXISTS tokens (
     hash       TEXT PRIMARY KEY,
-    machine    TEXT NOT NULL UNIQUE,
+    machine    TEXT NOT NULL UNIQUE,  -- the token's name: a machine, or a viewer
+    role       TEXT NOT NULL DEFAULT 'emit',
     created_at TEXT NOT NULL
 );
 """
@@ -114,7 +115,15 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(_DDL)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring databases created by older versions up to the current schema."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(tokens)")}
+    if "role" not in columns:  # 0.1.0: every token could send events
+        conn.execute("ALTER TABLE tokens ADD COLUMN role TEXT NOT NULL DEFAULT 'emit'")
 
 
 def _now() -> str:
@@ -281,55 +290,85 @@ def _keep(row: sqlite3.Row | None, key: str) -> Any:
 # ---------------------------------------------------------------- queries
 
 
+def _job_row(r: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "repo": r["repo"],
+        "job_id": r["job_id"],
+        "kind": r["kind"],
+        "issue": r["issue"],
+        "spec": r["spec"],
+        "stage": r["stage"],
+        "ts": r["ts"],
+        "machine": r["machine"],
+        "job": json.loads(r["snapshot"]) if r["snapshot"] else None,
+    }
+
+
+def _repo_row(r: sqlite3.Row) -> dict[str, Any]:
+    return {"repo": r["repo"], "machine": r["machine"], "last_seen": r["last_seen"]}
+
+
 def state(conn: sqlite3.Connection) -> dict[str, Any]:
     """Every repo and the latest state of every job, with its job.json snapshot if known."""
-    repos = [
-        {"repo": r["repo"], "machine": r["machine"], "last_seen": r["last_seen"]}
-        for r in conn.execute("SELECT * FROM repos ORDER BY repo, machine")
-    ]
-    jobs = [
-        {
-            "repo": r["repo"],
-            "job_id": r["job_id"],
-            "kind": r["kind"],
-            "issue": r["issue"],
-            "spec": r["spec"],
-            "stage": r["stage"],
-            "ts": r["ts"],
-            "machine": r["machine"],
-            "job": json.loads(r["snapshot"]) if r["snapshot"] else None,
-        }
-        for r in conn.execute("SELECT * FROM jobs ORDER BY repo, job_id")
-    ]
-    return {"repos": repos, "jobs": jobs}
+    repos = [_repo_row(r) for r in conn.execute("SELECT * FROM repos ORDER BY repo, machine")]
+    jobs = [_job_row(r) for r in conn.execute("SELECT * FROM jobs ORDER BY repo, job_id")]
+    last = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
+    return {"repos": repos, "jobs": jobs, "seq": int(last)}
 
 
-def events_after(
-    conn: sqlite3.Connection, after: int = 0, limit: int = 500, repo: str | None = None
-) -> list[dict[str, Any]]:
-    """Events in arrival order with ``seq`` greater than ``after``."""
-    sql = "SELECT * FROM events WHERE seq > ?"
-    args: list[Any] = [after]
+def job_state(conn: sqlite3.Connection, repo: str, job_id: str) -> dict[str, Any] | None:
+    """One job as ``state`` lists it, or None."""
+    row = conn.execute(
+        "SELECT * FROM jobs WHERE repo = ? AND job_id = ?", (repo, job_id)
+    ).fetchone()
+    return _job_row(row) if row else None
+
+
+def repo_state(conn: sqlite3.Connection, repo: str) -> list[dict[str, Any]]:
+    """The machines a repo was seen on, as ``state`` lists them."""
+    return [
+        _repo_row(r)
+        for r in conn.execute("SELECT * FROM repos WHERE repo = ? ORDER BY machine", (repo,))
+    ]
+
+
+def _filters(repo: str | None, job_id: str | None) -> tuple[str, list[Any]]:
+    sql, args = "", []
     if repo:
         sql += " AND repo = ?"
         args.append(repo)
-    sql += " ORDER BY seq LIMIT ?"
-    args.append(max(1, min(limit, 5000)))
-    return [_event_row(r) for r in conn.execute(sql, args)]
+    if job_id:
+        sql += " AND job_id = ?"
+        args.append(job_id)
+    return sql, args
+
+
+def events_after(
+    conn: sqlite3.Connection,
+    after: int = 0,
+    limit: int = 500,
+    repo: str | None = None,
+    job_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Events in arrival order with ``seq`` greater than ``after``."""
+    where, args = _filters(repo, job_id)
+    rows = conn.execute(
+        f"SELECT * FROM events WHERE seq > ?{where} ORDER BY seq LIMIT ?",
+        [after, *args, max(1, min(limit, 5000))],
+    )
+    return [_event_row(r) for r in rows]
 
 
 def last_events(
-    conn: sqlite3.Connection, count: int, repo: str | None = None
+    conn: sqlite3.Connection, count: int, repo: str | None = None, job_id: str | None = None
 ) -> list[dict[str, Any]]:
     """The ``count`` most recent events by arrival, oldest first."""
-    sql = "SELECT * FROM events"
-    args: list[Any] = []
-    if repo:
-        sql += " WHERE repo = ?"
-        args.append(repo)
-    sql += " ORDER BY seq DESC LIMIT ?"
-    args.append(max(0, count))
-    return [_event_row(r) for r in reversed(conn.execute(sql, args).fetchall())]
+    where, args = _filters(repo, job_id)
+    rows = conn.execute(
+        f"SELECT * FROM events WHERE 1 = 1{where} ORDER BY seq DESC LIMIT ?",
+        [*args, max(0, min(count, 5000))],
+    ).fetchall()
+    return [_event_row(r) for r in reversed(rows)]
 
 
 def _event_row(r: sqlite3.Row) -> dict[str, Any]:
@@ -349,42 +388,60 @@ def _event_row(r: sqlite3.Row) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- tokens
 
+ROLES = ("emit", "view")
+
+
+@dataclass(frozen=True)
+class Token:
+    """Who is calling. ``emit`` tokens send events (one per machine); ``view`` tokens only read."""
+
+    name: str
+    role: str
+
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def add_token(conn: sqlite3.Connection, machine: str) -> str:
-    """Create (or rotate) the token of a machine. Only its hash is stored."""
-    if not machine.strip():
-        raise ValueError("machine name must not be empty")
+def add_token(conn: sqlite3.Connection, name: str, role: str = "emit") -> str:
+    """Create (or rotate) a named token. Only its hash is stored."""
+    if not name.strip():
+        raise ValueError("token name must not be empty")
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
     token = secrets.token_urlsafe(32)
-    conn.execute("DELETE FROM tokens WHERE machine = ?", (machine,))
+    conn.execute("DELETE FROM tokens WHERE machine = ?", (name,))
     conn.execute(
-        "INSERT INTO tokens (hash, machine, created_at) VALUES (?, ?, ?)",
-        (_hash(token), machine, _now()),
+        "INSERT INTO tokens (hash, machine, role, created_at) VALUES (?, ?, ?, ?)",
+        (_hash(token), name, role, _now()),
     )
     return token
 
 
-def check_token(conn: sqlite3.Connection, token: str) -> str | None:
-    """The machine a token belongs to, or None."""
+def check_token(conn: sqlite3.Connection, token: str) -> Token | None:
+    """The token's name and role, or None if it is unknown."""
     if not token:
         return None
-    row = conn.execute("SELECT machine FROM tokens WHERE hash = ?", (_hash(token),)).fetchone()
-    return str(row["machine"]) if row else None
+    row = conn.execute(
+        "SELECT machine, role FROM tokens WHERE hash = ?", (_hash(token),)
+    ).fetchone()
+    return Token(name=str(row["machine"]), role=str(row["role"])) if row else None
 
 
 def list_tokens(conn: sqlite3.Connection) -> list[dict[str, str]]:
     return [
-        {"machine": r["machine"], "created_at": r["created_at"]}
-        for r in conn.execute("SELECT machine, created_at FROM tokens ORDER BY machine")
+        {"name": r["machine"], "role": r["role"], "created_at": r["created_at"]}
+        for r in conn.execute("SELECT machine, role, created_at FROM tokens ORDER BY machine")
     ]
 
 
-def remove_token(conn: sqlite3.Connection, machine: str) -> bool:
-    return conn.execute("DELETE FROM tokens WHERE machine = ?", (machine,)).rowcount > 0
+def remove_token(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("DELETE FROM tokens WHERE machine = ?", (name,)).rowcount > 0
 
 
-def has_tokens(conn: sqlite3.Connection) -> bool:
-    return conn.execute("SELECT 1 FROM tokens LIMIT 1").fetchone() is not None
+def has_tokens(conn: sqlite3.Connection, role: str | None = None) -> bool:
+    if role is None:
+        return conn.execute("SELECT 1 FROM tokens LIMIT 1").fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM tokens WHERE role = ? LIMIT 1", (role,)).fetchone() is not None
+    )
