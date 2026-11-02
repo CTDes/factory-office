@@ -73,3 +73,13 @@ test("office_js_uses_model_hat_color", () => {
   assert.ok(!/const (ROLE|MODEL)\b/.test(src));
   assert.ok(src.includes("M.hatColor"));
 });
+
+test("fixture_jobs_keep_working_with_hats", () => {
+  const lines = fs.readFileSync(path.join(__dirname, "..", "fixtures", "events_v1.jsonl"), "utf8").trim().split("\n");
+  assert.ok(lines.length > 0);
+  for (const line of lines) {
+    const j = M.normalizeJob(JSON.parse(line));
+    assert.ok(M.placeFor(j).zone);
+    for (const role of ["planner", "builder", "reviewer"]) assert.match(M.hatColor(j, role), /^#[0-9a-f]{6}$/);
+  }
+});
