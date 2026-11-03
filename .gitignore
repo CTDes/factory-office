@@ -16,3 +16,4 @@ dist/
 # software factory
 factory/jobs/
 .claude/worktrees/
+.env

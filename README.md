@@ -36,6 +36,17 @@ factory-job office link <office-token> --url http://nas:8765   # office on anoth
 That checks the office accepts the token, saves the link (gitignored), and sends the repository's
 history. `factory-job office status` and `office unlink` do what they say.
 
+Developing on this machine, `compose.dev.yaml` makes the container run the checkout's `src/`, so
+a merged change needs a restart, not a rebuild:
+
+```sh
+echo COMPOSE_FILE=compose.yaml:compose.dev.yaml > .env     # once (.env is gitignored)
+docker compose up -d
+git pull && docker compose restart                        # after each merge
+```
+
+Only a change to `Dockerfile` or `pyproject.toml` needs `docker compose up -d --build`.
+
 Without Docker: `pip install -e .` and `factory-office serve` (database in
 `~/.local/share/factory-office/`, or `$FACTORY_OFFICE_DB`).
 

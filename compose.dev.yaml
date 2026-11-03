@@ -1,0 +1,10 @@
+# Developing on this machine: the container runs this checkout's src/, not the copy in the image.
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d    (or COMPOSE_FILE in a local .env)
+#   after a git pull: docker compose restart                     (no --build)
+# Only a change to Dockerfile or pyproject.toml needs --build.
+services:
+  office:
+    environment:
+      PYTHONPATH: /src
+    volumes:
+      - ./src:/src:ro
