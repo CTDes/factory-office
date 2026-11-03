@@ -78,7 +78,8 @@ canvas { display: block; margin: 0 auto; image-rendering: pixelated; image-rende
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sw { width: 10px; height: 10px; display: inline-block; }
 .sw.planner { background: #5b8fd8; } .sw.builder { background: #e08a3c; } .sw.reviewer { background: #5fae6a; }
-.sw.haiku { background: #5fd0c8; } .sw.sonnet { background: #f2b84b; } .sw.opus { background: #b48cf0; }
+.sw.haiku { background: #e4f55a; } .sw.sonnet { background: #ff4fe0; } .sw.opus { background: #9a30f0; }
+.sw.unknown { background: #c8c8c8; }
 .sw.low { background: #79c16d; } .sw.medium { background: #f2b84b; } .sw.high { background: #e5584b; }
 
 .feed { background: #0f0d15; border: 2px solid var(--line); }

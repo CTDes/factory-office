@@ -188,6 +188,26 @@
     return { messages, rest };
   }
 
+  /* Hat and shirt palettes. Hats (model) stay >= 100 apart in RGB from every shirt (role). */
+  const SHIRT_COLORS = { planner: "#5b8fd8", builder: "#e08a3c", reviewer: "#5fae6a", boss: "#c9506a" };
+  const MODEL_COLORS = { haiku: "#e4f55a", sonnet: "#ff4fe0", opus: "#9a30f0" };
+  const UNKNOWN_MODEL_COLOR = "#c8c8c8";
+  const IDLE_COLOR = "#6f6987";
+
+  /* The model an agent works on: the claim's model, else models[role], else null. */
+  function hatModel(job, role) {
+    if (job && job.claim && typeof job.claim.model === "string" && job.claim.model) return job.claim.model;
+    const m = job && job.models ? job.models[role] : null;
+    return m || null;
+  }
+
+  function hatColor(job, role) {
+    if (!job) return IDLE_COLOR;
+    const m = hatModel(job, role);
+    return m && Object.prototype.hasOwnProperty.call(MODEL_COLORS, m) ? MODEL_COLORS[m] : UNKNOWN_MODEL_COLOR;
+  }
+
   return { STAGES, FINISHED, createModel, loadState, applyMessage, normalizeJob, gateResult,
-    placeFor, isLive, liveJobs, specs, counts, links, parseSSE };
+    placeFor, isLive, liveJobs, specs, counts, links, parseSSE,
+    SHIRT_COLORS, MODEL_COLORS, UNKNOWN_MODEL_COLOR, IDLE_COLOR, hatModel, hatColor };
 });

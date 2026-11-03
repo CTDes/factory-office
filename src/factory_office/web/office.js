@@ -22,8 +22,6 @@
     ink: "#2a1f12", skin: "#f0c39a", eye: "#2a1f12", leg: "#2f3348", shoe: "#14121b",
     hair: "#3b2a20", bubble: "#efe9dc"
   };
-  const ROLE = { planner: "#5b8fd8", builder: "#e08a3c", reviewer: "#5fae6a", boss: "#c9506a" };
-  const MODEL = { haiku: "#5fd0c8", sonnet: "#f2b84b", opus: "#b48cf0", idle: "#6f6987" };
   const RISK = { low: P.green, medium: P.amber, high: P.red };
   const STAGE_COLOR = {
     "intake": "#6fa8e8", "needs-info": "#b48cf0", "build": "#e08a3c", "gate": "#5fd0c8",
@@ -308,11 +306,10 @@
       const frame = a.path.length && !reduced ? Math.floor(a.walkT * 6) % 2 : 0;
       const working = a.job && atSeat(a);
       const bob = working && !reduced && Math.floor(now / 260 + a.seat.x) % 2 ? 1 : 0;
-      const model = a.job && a.job.models ? a.job.models[a.role] : null;
-      const hat = a.job ? (MODEL[model] || ROLE[a.role]) : MODEL.idle;
-      drawChar(ctx, a.x, a.y, hat, ROLE[a.role], frame, bob);
+      const hat = M.hatColor(a.job, a.role);
+      drawChar(ctx, a.x, a.y, hat, M.SHIRT_COLORS[a.role], frame, bob);
     }
-    drawChar(ctx, SEATS.boss.x, SEATS.boss.y, P.hair, ROLE.boss, 0, L.alarm && blink && !reduced ? 1 : 0);
+    drawChar(ctx, SEATS.boss.x, SEATS.boss.y, P.hair, M.SHIRT_COLORS.boss, 0, L.alarm && blink && !reduced ? 1 : 0);
 
     desk(ctx, 6, 42, 36); desk(ctx, 52, 42, 36); desk(ctx, 94, 42, 36); desk(ctx, 192, 42, 36); desk(ctx, 270, 56, 40);
     monitor(ctx, 54, 33); monitor(ctx, 96, 33); monitor(ctx, 296, 47);
