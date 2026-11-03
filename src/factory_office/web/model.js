@@ -207,7 +207,18 @@
     return m && Object.prototype.hasOwnProperty.call(MODEL_COLORS, m) ? MODEL_COLORS[m] : UNKNOWN_MODEL_COLOR;
   }
 
-  return { STAGES, FINISHED, createModel, loadState, applyMessage, normalizeJob, gateResult,
+  /* Room geometry. Seated agents sit SEATED_LIFT px higher so the shirt shows above the desk top. */
+  const SEATS = { planner: { x: 37, y: 48 }, b0: { x: 82, y: 48 }, b1: { x: 124, y: 48 }, reviewer: { x: 219, y: 48 }, boss: { x: 300, y: 62 } };
+  const DESK_TOP = { planner: 42, b0: 42, b1: 42, reviewer: 42 };
+  const SPRITE_BODY = ["..hhh..", ".hhhhh.", ".sssss.", ".seses.", ".sssss.", "..bbb..", ".bbbbb.", "sbbdbbs", ".bbbbb."];
+  const SPRITE_LEGS = [[".l...l.", ".k...k."], ["..l.l..", "..k.k.."]];
+  const SEATED_LIFT = 3;
+
+  function spriteTop(x, y, seated, bob) {
+    return Math.round(y) - 11 - (seated ? SEATED_LIFT : 0) + bob;
+  }
+
+  return { SEATS, DESK_TOP, SPRITE_BODY, SPRITE_LEGS, SEATED_LIFT, spriteTop, STAGES, FINISHED, createModel, loadState, applyMessage, normalizeJob, gateResult,
     placeFor, isLive, liveJobs, specs, counts, links, parseSSE,
     SHIRT_COLORS, MODEL_COLORS, UNKNOWN_MODEL_COLOR, IDLE_COLOR, hatModel, hatColor };
 });

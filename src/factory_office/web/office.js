@@ -57,12 +57,10 @@
   function label(ctx, s, x, y) { R(ctx, x - 2, y - 1, tw(s) + 4, 7, P.labelBg); txt(ctx, s, x, y, P.labelInk); }
 
   // ---------------------------------------------------------------- sprites
-  const BODY = ["..hhh..", ".hhhhh.", ".sssss.", ".seses.", ".sssss.", "..bbb..", ".bbbbb.", "sbbdbbs", ".bbbbb."];
-  const LEGS = [[".l...l.", ".k...k."], ["..l.l..", "..k.k.."]];
-  function drawChar(ctx, fx, fy, hat, body, frame, bob) {
-    const rows = BODY.concat(LEGS[frame]);
+  function drawChar(ctx, fx, fy, hat, body, frame, bob, seated) {
+    const rows = M.SPRITE_BODY.concat(M.SPRITE_LEGS[frame]);
     const map = { h: hat, s: P.skin, e: P.eye, b: body, d: P.trim, l: P.leg, k: P.shoe };
-    const x0 = Math.round(fx) - 3, y0 = Math.round(fy) - 11 + bob;
+    const x0 = Math.round(fx) - 3, y0 = M.spriteTop(fx, fy, !!seated, bob);
     rows.forEach((row, r) => {
       for (let c = 0; c < row.length; c++) {
         if (row[c] !== ".") { ctx.fillStyle = map[row[c]]; ctx.fillRect(x0 + c, y0 + r, 1, 1); }
@@ -92,7 +90,6 @@
   function monitor(ctx, x, y) { R(ctx, x, y, 10, 8, P.monitor); R(ctx, x + 1, y + 1, 8, 6, P.screenOff); R(ctx, x + 4, y + 8, 2, 1, P.monitor); }
 
   // ---------------------------------------------------------------- room geometry
-  const SEATS = { planner: { x: 37, y: 48 }, b0: { x: 82, y: 48 }, b1: { x: 124, y: 48 }, reviewer: { x: 219, y: 48 }, boss: { x: 300, y: 62 } };
   const CORR = 36, COFFEE = { x: 49, y: 37 };
   const CHAIRS = [6, 20, 34];
   const ARCHIVE = { x: 152, y: 80 }, TRASH = { x: 189, y: 90 };
@@ -163,10 +160,10 @@
 
   function makeAgents() {
     return [
-      { role: "planner", seat: SEATS.planner },
-      { role: "builder", seat: SEATS.b0, k: 0 },
-      { role: "builder", seat: SEATS.b1, k: 1 },
-      { role: "reviewer", seat: SEATS.reviewer }
+      { role: "planner", seat: M.SEATS.planner },
+      { role: "builder", seat: M.SEATS.b0, k: 0 },
+      { role: "builder", seat: M.SEATS.b1, k: 1 },
+      { role: "reviewer", seat: M.SEATS.reviewer }
     ].map(a => Object.assign(a, { x: a.seat.x, y: a.seat.y, path: [], job: null, coffee: false, wait: 0, walkT: 0 }));
   }
 
@@ -196,7 +193,7 @@
       const r = canvas.getBoundingClientRect();
       const x = (ev.clientX - r.left) / r.width * W, y = (ev.clientY - r.top) / r.height * H;
       for (const [key, p] of view.pos) if (x >= p.x - 1 && x <= p.x + 13 && y >= p.y - 1 && y <= p.y + 9) return key;
-      for (const a of view.agents) if (a.job && Math.abs(x - a.x) <= 4 && y >= a.y - 12 && y <= a.y) return a.job.key;
+      for (const a of view.agents) if (a.job && Math.abs(x - a.x) <= 4 && y >= a.y - 12 - (atSeat(a) ? M.SEATED_LIFT : 0) && y <= a.y) return a.job.key;
       return null;
     };
     canvas.addEventListener("click", ev => { const k = pick(ev); if (k) select(k); });
@@ -307,9 +304,9 @@
       const working = a.job && atSeat(a);
       const bob = working && !reduced && Math.floor(now / 260 + a.seat.x) % 2 ? 1 : 0;
       const hat = M.hatColor(a.job, a.role);
-      drawChar(ctx, a.x, a.y, hat, M.SHIRT_COLORS[a.role], frame, bob);
+      drawChar(ctx, a.x, a.y, hat, M.SHIRT_COLORS[a.role], frame, bob, atSeat(a));
     }
-    drawChar(ctx, SEATS.boss.x, SEATS.boss.y, P.hair, M.SHIRT_COLORS.boss, 0, L.alarm && blink && !reduced ? 1 : 0);
+    drawChar(ctx, M.SEATS.boss.x, M.SEATS.boss.y, P.hair, M.SHIRT_COLORS.boss, 0, L.alarm && blink && !reduced ? 1 : 0);
 
     desk(ctx, 6, 42, 36); desk(ctx, 52, 42, 36); desk(ctx, 94, 42, 36); desk(ctx, 192, 42, 36); desk(ctx, 270, 56, 40);
     monitor(ctx, 54, 33); monitor(ctx, 96, 33); monitor(ctx, 296, 47);
@@ -344,7 +341,7 @@
       drawFolder(ctx, l.job, p.x, p.y, false, now);
       if (now > l.until) { view.leaving.delete(key); view.pos.delete(key); }
     }
-    if (L.alarm) bubble(ctx, SEATS.boss.x - 3, 40 + (blink ? 0 : 1), "!", P.red);
+    if (L.alarm) bubble(ctx, M.SEATS.boss.x - 3, 40 + (blink ? 0 : 1), "!", P.red);
   }
 
   // ---------------------------------------------------------------- page sections
