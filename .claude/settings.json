@@ -30,8 +30,5 @@
       },
       "autoUpdate": true
     }
-  },
-  "enabledPlugins": {
-    "software-factory@ctdes-factory": true
   }
 }
